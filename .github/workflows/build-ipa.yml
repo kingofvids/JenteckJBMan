@@ -1,0 +1,70 @@
+name: Build Jenteck Jailbreak Manager IPA
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    # macos-14 ships Xcode 15.x, which includes the iOS 15+ SDK this project needs.
+    # If this version stops being available, check:
+    # https://github.com/actions/runner-images/blob/main/images/macos/macos-14-Readme.md
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_15.2.app/Contents/Developer
+
+      - name: Show Xcode & SDK versions (sanity check)
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      - name: Resolve Swift Package dependencies
+        run: |
+          cd Application
+          xcodebuild -resolvePackageDependencies -project Dopamine.xcodeproj -scheme Dopamine
+
+      - name: Archive (unsigned)
+        run: |
+          cd Application
+          xcodebuild \
+            -project Dopamine.xcodeproj \
+            -scheme Dopamine \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath "$RUNNER_TEMP/JenteckJBMan.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
+
+      - name: Package archive into an unsigned .ipa
+        run: |
+          set -e
+          PAYLOAD_DIR="$RUNNER_TEMP/Payload"
+          mkdir -p "$PAYLOAD_DIR"
+          # The built .app lives inside the archive's Products/Applications folder.
+          cp -R "$RUNNER_TEMP/JenteckJBMan.xcarchive/Products/Applications/"*.app "$PAYLOAD_DIR/"
+          cd "$RUNNER_TEMP"
+          zip -r JenteckJBMan-unsigned.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JenteckJBMan-unsigned-ipa
+          path: ${{ runner.temp }}/JenteckJBMan-unsigned.ipa
+          retention-days: 14
+
+      - name: Upload full .xcarchive (for local re-signing/debugging)
+        uses: actions/upload-artifact@v4
+        with:
+          name: JenteckJBMan-xcarchive
+          path: ${{ runner.temp }}/JenteckJBMan.xcarchive
+          retention-days: 14
